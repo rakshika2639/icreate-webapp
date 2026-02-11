@@ -42,8 +42,14 @@ body {
   padding: 20px;
   background: white;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  flex-wrap: wrap;
   justify-content: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
+}
+
+.nav-tabs::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
 }
 
 .nav-tab {
@@ -482,16 +488,35 @@ body {
 
 /* Responsive */
 @media (max-width: 768px) {
+  .header {
+    padding: 30px 15px;
+  }
+
   .header-content h1 {
     font-size: 1.8em;
   }
 
   .nav-tabs {
-    flex-direction: column;
+    justify-content: flex-start;
+    padding: 15px;
   }
 
   .nav-tab {
-    width: 100%;
+    flex: 0 0 auto;
+    padding: 8px 16px;
+    font-size: 0.95em;
+  }
+
+  .main-content {
+    padding: 20px 15px;
+  }
+
+  .card {
+    padding: 20px;
+  }
+
+  .card h2 {
+    font-size: 1.5em;
   }
 
   .students-grid {
@@ -508,13 +533,62 @@ body {
 
   .stats-summary {
     grid-template-columns: 1fr;
+    gap: 15px;
+  }
+
+  .stat-box {
+    padding: 15px;
+  }
+
+  .stat-number {
+    font-size: 2em;
   }
 
   .controls {
     flex-direction: column;
+    align-items: stretch;
   }
 
   .controls .input-field {
     min-width: 100%;
+  }
+
+  .btn {
+    width: 100%;
+    padding: 14px; /* Larger touch targets for mobile */
+  }
+
+  .btn-small {
+    width: auto;
+    padding: 8px 16px;
+  }
+
+  .video-scanner {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-content h1 {
+    font-size: 1.5em;
+  }
+
+  .header-content p {
+    font-size: 0.9em;
+  }
+
+  .nav-tabs {
+    padding: 10px;
+  }
+
+  .card {
+    padding: 15px;
+    border-radius: 8px;
+  }
+  
+  .attendance-table th, 
+  .attendance-table td {
+    padding: 10px;
+    font-size: 0.85em;
   }
 }

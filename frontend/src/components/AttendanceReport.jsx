@@ -40,7 +40,7 @@ function AttendanceReport() {
       link.setAttribute('download', 'attendance_report.csv');
       document.body.appendChild(link);
       link.click();
-      link.parentChild.removeChild(link);
+      document.body.removeChild(link);
     } catch (error) {
       console.error('Error downloading report:', error);
     }

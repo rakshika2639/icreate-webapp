@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "qrId": "5f3c1653-97df-44cf-a434-5b8d191cbc4c",
+    "studentId": "5c588d52-48e0-4853-a19d-d5cf4e1a4bd0",
+    "name": "Bob Smith",
+    "registrationNumber": "REG002",
+    "email": "bob.smith@student.edu",
+    "timestamp": "2026-02-10T16:58:46.748Z",
+    "date": "2026-02-10"
+  }
+]
