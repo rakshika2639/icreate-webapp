@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_URL from '../config';
 import '../styles/App.css';
 
 function QRGenerator() {
@@ -14,7 +15,7 @@ function QRGenerator() {
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/students');
+      const response = await axios.get(`${API_URL}/api/students`);
       setStudents(response.data);
     } catch (error) {
       console.error('Error fetching students:', error);

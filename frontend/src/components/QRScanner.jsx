@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import QrScanner from 'qr-scanner';
 import axios from 'axios';
+import API_URL from '../config';
 import '../styles/App.css';
 
 function QRScanner() {
@@ -40,7 +41,7 @@ function QRScanner() {
       setMessage('');
       setScannedStudent(null);
 
-      const response = await axios.post('/api/attendance', {
+      const response = await axios.post(`${API_URL}/api/attendance`, {
         qrId,
         timestamp: new Date().toISOString()
       });

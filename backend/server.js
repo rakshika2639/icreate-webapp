@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -14,10 +15,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true
+}));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
@@ -270,9 +275,10 @@ app.get('/api/report', async (req, res) => {
       return res.status(400).json({ error: 'No attendance records' });
     }
 
-    // Convert to CSV
-    const headers = ['Name', 'Registration Number', 'Email', 'Date', 'Time'];
+    // Convert to CSV with UTF-8 BOM for Excel support
+    const headers = ['Student ID', 'Name', 'Registration Number', 'Email', 'Date', 'Time'];
     const rows = attendance.map(a => [
+      a.studentId,
       a.name,
       a.registrationNumber,
       a.email,
@@ -280,11 +286,14 @@ app.get('/api/report', async (req, res) => {
       new Date(a.timestamp).toLocaleTimeString()
     ]);
 
-    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const csv = [headers, ...rows].map(row => 
+      row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=attendance.csv');
-    res.send(csv);
+    const bom = '\ufeff';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=attendance_report_${new Date().toISOString().split('T')[0]}.csv`);
+    res.send(bom + csv);
   } catch (error) {
     res.status(500).json({ error: 'Error generating report' });
   }

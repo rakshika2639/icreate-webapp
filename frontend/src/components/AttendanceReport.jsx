@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_URL from '../config';
 import '../styles/App.css';
 
 function AttendanceReport() {
   const [attendance, setAttendance] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
@@ -16,8 +18,8 @@ function AttendanceReport() {
     setLoading(true);
     try {
       const [attendanceRes, statsRes] = await Promise.all([
-        axios.get(`/api/attendance/${selectedDate}`),
-        axios.get('/api/stats')
+        axios.get(`${API_URL}/api/attendance/${selectedDate}`),
+        axios.get(`${API_URL}/api/stats`)
       ]);
       setAttendance(attendanceRes.data);
       setStats(statsRes.data);
@@ -29,20 +31,27 @@ function AttendanceReport() {
   };
 
   const downloadReport = async () => {
+    if (attendance.length === 0) return;
+    
+    setDownloading(true);
     try {
-      const response = await axios.get('/api/report', {
+      const response = await axios.get(`${API_URL}/api/report`, {
         responseType: 'blob'
       });
       
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', 'attendance_report.csv');
+      link.setAttribute('download', `attendance_${selectedDate}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading report:', error);
+      alert('Failed to download report. Please try again.');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -78,8 +87,12 @@ function AttendanceReport() {
           onChange={(e) => setSelectedDate(e.target.value)}
           className="input-field"
         />
-        <button onClick={downloadReport} className="btn btn-success">
-          ⬇️ Download CSV
+        <button 
+          onClick={downloadReport} 
+          className="btn btn-success"
+          disabled={downloading || attendance.length === 0}
+        >
+          {downloading ? '⌛ Generating...' : '⬇️ Download CSV'}
         </button>
       </div>
 
