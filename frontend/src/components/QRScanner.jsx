@@ -14,13 +14,19 @@ function QRScanner() {
   const [scannedCount, setScannedCount] = useState(0);
   const [useCamera, setUseCamera] = useState(false);
 
+  const [lastScannedId, setLastScannedId] = useState(null);
+  const [scanCooldown, setScanCooldown] = useState(false);
+
   useEffect(() => {
+    if (useCamera && videoRef.current && !scanner) {
+      startScanning();
+    }
     return () => {
       if (scanner) {
         scanner.destroy();
       }
     };
-  }, [scanner]);
+  }, [useCamera, scanner]);
 
   const handleManualScan = async (e) => {
     e.preventDefault();
@@ -36,11 +42,14 @@ function QRScanner() {
   };
 
   const markAttendance = async (qrId) => {
+    if (scanCooldown && lastScannedId === qrId) return;
+    
     try {
+      setScanCooldown(true);
+      setLastScannedId(qrId);
       setError('');
       setMessage('');
-      setScannedStudent(null);
-
+      
       const response = await axios.post(`${API_URL}/api/attendance`, {
         qrId,
         timestamp: new Date().toISOString()
@@ -55,9 +64,14 @@ function QRScanner() {
           setScannedCount(prev => prev + 1);
         }
       }
+      
+      // Reset cooldown after 3 seconds to allow re-scanning if needed
+      setTimeout(() => setScanCooldown(false), 3000);
+      
     } catch (err) {
       setError(err.response?.data?.error || 'Error marking attendance');
       setScannedStudent(null);
+      setScanCooldown(false);
     }
   };
 
@@ -68,7 +82,9 @@ function QRScanner() {
       const qrScanner = new QrScanner(
         videoRef.current,
         (result) => {
-          markAttendance(result.data);
+          if (result && result.data) {
+            markAttendance(result.data);
+          }
         },
         {
           onDecodeError: () => {},
@@ -78,10 +94,11 @@ function QRScanner() {
         }
       );
 
-      setScanner(qrScanner);
       await qrScanner.start();
+      setScanner(qrScanner);
       setIsScanning(true);
     } catch (err) {
+      console.error('Scanner error:', err);
       setError('Error accessing camera: ' + err.message);
     }
   };
@@ -126,26 +143,25 @@ function QRScanner() {
         </div>
       ) : (
         <div className="camera-section">
-          {isScanning ? (
-            <>
-              <video ref={videoRef} className="video-scanner"></video>
-              <button onClick={stopScanning} className="btn btn-danger">
-                Stop Camera
-              </button>
-            </>
-          ) : (
-            <div className="camera-placeholder">
-              <p>Camera is ready</p>
-              <button onClick={startScanning} className="btn btn-primary">
-                Start Scanning
-              </button>
-            </div>
+          <div className="video-container" style={{ position: 'relative', width: '100%', maxWidth: '500px' }}>
+            <video ref={videoRef} className="video-scanner" style={{ width: '100%', borderRadius: '8px' }}></video>
+            {!isScanning && (
+              <div className="camera-placeholder" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+                <p>Initializing camera...</p>
+              </div>
+            )}
+          </div>
+          
+          {isScanning && (
+            <button onClick={stopScanning} className="btn btn-danger">
+              Stop Camera
+            </button>
           )}
 
           <button
             onClick={() => {
-              setUseCamera(false);
               stopScanning();
+              setUseCamera(false);
             }}
             className="btn btn-secondary"
           >
