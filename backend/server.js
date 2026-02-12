@@ -73,34 +73,39 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const data = xlsx.utils.sheet_to_json(worksheet);
 
     const studentsToSave = [];
-    
+
     // Clear existing students for fresh upload
     await Student.deleteMany({});
 
-    for (const row of data) {
+    // Prepare student data and generate QR codes in parallel
+    const qrPromises = data.map(async (row) => {
       const name = row.Name || row.name || '';
       const email = row.Email || row.email || '';
       const regNo = row['Registration Number'] || row['registration number'] || row.RegNo || '';
-      
-      if (!name || !email) continue;
+
+      if (!name || !email) return null;
 
       const id = uuidv4();
       const qrId = uuidv4();
-      
+
       try {
         const qrCode = await QRCode.toDataURL(qrId);
-        studentsToSave.push({
+        return {
           id,
           qrId,
           name,
           registrationNumber: regNo,
           email,
           qrCode
-        });
+        };
       } catch (err) {
         console.error(`QR generation error for ${email}:`, err);
+        return null;
       }
-    }
+    });
+
+    const resolvedStudents = await Promise.all(qrPromises);
+    studentsToSave.push(...resolvedStudents.filter(student => student !== null));
 
     await Student.insertMany(studentsToSave);
 
