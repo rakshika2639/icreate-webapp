@@ -13,9 +13,6 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-import sqlite3 from 'sqlite3';
-import fs from 'fs';
-import path from 'path';
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -116,14 +113,30 @@ const upload = multer({ storage: storage });
 // Upload Excel file
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
+    console.log('Upload request received');
     if (!req.file) {
+      console.log('No file uploaded');
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(worksheet);
+    console.log('File received:', req.file.originalname, 'Size:', req.file.size);
+
+    let data;
+    if (req.file.originalname.endsWith('.csv')) {
+      // Handle CSV files
+      const csvText = req.file.buffer.toString('utf8');
+      const worksheet = xlsx.utils.csv_to_sheet(csvText);
+      data = xlsx.utils.sheet_to_json(worksheet);
+    } else {
+      // Handle Excel files
+      const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      data = xlsx.utils.sheet_to_json(worksheet);
+    }
+
+    console.log('Parsed data length:', data.length);
+    console.log('First row:', data[0]);
 
     // Clear existing students for fresh upload
     db.run('DELETE FROM students');
