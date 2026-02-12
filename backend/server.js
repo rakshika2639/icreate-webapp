@@ -3,13 +3,100 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import bodyParser from 'body-parser';
-import mongoose from 'mongoose';
 import xlsx from 'xlsx';
 import QRCode from 'qrcode';
 import { v4 as uuidv4 } from 'uuid';
+import sqlite3 from 'sqlite3';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+import sqlite3 from 'sqlite3';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
+
+// Initialize SQLite database
+const dbPath = path.join(__dirname, 'data', 'attendance.db');
+const db = new sqlite3.Database(dbPath);
+
+// Create tables if they don't exist
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS students (
+      id TEXT PRIMARY KEY,
+      qrId TEXT UNIQUE,
+      name TEXT,
+      registrationNumber TEXT,
+      email TEXT,
+      qrCode TEXT
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS attendance (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      qrId TEXT,
+      studentId TEXT,
+      name TEXT,
+      registrationNumber TEXT,
+      email TEXT,
+      timestamp TEXT,
+      date TEXT,
+      FOREIGN KEY (qrId) REFERENCES students (qrId)
+    )
+  `);
+
+  // Migrate existing JSON data to database
+  if (fs.existsSync(path.join(process.cwd(), 'backend', 'data', 'students.json'))) {
+    const students = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'backend', 'data', 'students.json'), 'utf8'));
+    if (students.length > 0) {
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO students (id, qrId, name, registrationNumber, email, qrCode)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      students.forEach(student => {
+        stmt.run(
+          student.id,
+          student.qrId,
+          student.name,
+          student.registrationNumber,
+          student.email,
+          student.qrCode
+        );
+      });
+      stmt.finalize();
+      console.log('Migrated students data to database');
+    }
+  }
+
+  if (fs.existsSync(path.join(process.cwd(), 'backend', 'data', 'attendance.json'))) {
+    const attendance = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'backend', 'data', 'attendance.json'), 'utf8'));
+    if (attendance.length > 0) {
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO attendance (qrId, studentId, name, registrationNumber, email, timestamp, date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      attendance.forEach(record => {
+        stmt.run(
+          record.qrId,
+          record.studentId,
+          record.name,
+          record.registrationNumber,
+          record.email,
+          record.timestamp,
+          record.date
+        );
+      });
+      stmt.finalize();
+      console.log('Migrated attendance data to database');
+    }
+  }
+});
 
 // Middleware
 app.use(cors({
@@ -19,40 +106,6 @@ app.use(cors({
 }));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
-
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  console.error('MONGODB_URI is not defined in environment variables');
-} else {
-  mongoose.connect(MONGODB_URI)
-    .then(() => console.log('Connected to MongoDB'))
-    .catch(err => console.error('MongoDB connection error:', err));
-}
-
-// Schemas
-const studentSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  qrId: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  registrationNumber: { type: String },
-  email: { type: String, required: true },
-  qrCode: { type: String }
-});
-
-const attendanceSchema = new mongoose.Schema({
-  qrId: { type: String, required: true },
-  studentId: { type: String, required: true },
-  name: { type: String, required: true },
-  registrationNumber: { type: String },
-  email: { type: String, required: true },
-  timestamp: { type: String, required: true },
-  date: { type: String, required: true }
-});
-
-const Student = mongoose.model('Student', studentSchema);
-const Attendance = mongoose.model('Attendance', attendanceSchema);
 
 // File upload setup
 const storage = multer.memoryStorage();
@@ -72,10 +125,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const worksheet = workbook.Sheets[sheetName];
     const data = xlsx.utils.sheet_to_json(worksheet);
 
-    const studentsToSave = [];
-
     // Clear existing students for fresh upload
-    await Student.deleteMany({});
+    db.run('DELETE FROM students');
+    db.run('DELETE FROM attendance');
 
     // Prepare student data and generate QR codes in parallel
     const qrPromises = data.map(async (row) => {
@@ -105,9 +157,25 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     });
 
     const resolvedStudents = await Promise.all(qrPromises);
-    studentsToSave.push(...resolvedStudents.filter(student => student !== null));
+    const studentsToSave = resolvedStudents.filter(student => student !== null);
 
-    await Student.insertMany(studentsToSave);
+    // Insert students into database
+    const stmt = db.prepare(`
+      INSERT INTO students (id, qrId, name, registrationNumber, email, qrCode)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    studentsToSave.forEach(student => {
+      stmt.run(
+        student.id,
+        student.qrId,
+        student.name,
+        student.registrationNumber,
+        student.email,
+        student.qrCode
+      );
+    });
+    stmt.finalize();
 
     res.json({
       success: true,
@@ -121,66 +189,104 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 // Get all students
-app.get('/api/students', async (req, res) => {
+app.get('/api/students', (req, res) => {
   try {
-    const students = await Student.find({});
-    res.json(students);
+    db.all('SELECT * FROM students', [], (err, rows) => {
+      if (err) {
+        console.error('Error fetching students:', err);
+        return res.status(500).json({ error: 'Error fetching students' });
+      }
+      res.json(rows);
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching students' });
   }
 });
 
 // Get single student by QR ID
-app.get('/api/student/:qrId', async (req, res) => {
+app.get('/api/student/:qrId', (req, res) => {
   try {
-    const student = await Student.findOne({ qrId: req.params.qrId });
-    if (!student) {
-      return res.status(404).json({ error: 'QR code not found' });
-    }
-    res.json(student);
+    db.get('SELECT * FROM students WHERE qrId = ?', [req.params.qrId], (err, row) => {
+      if (err) {
+        console.error('Error fetching student:', err);
+        return res.status(500).json({ error: 'Error fetching student' });
+      }
+      if (!row) {
+        return res.status(404).json({ error: 'QR code not found' });
+      }
+      res.json(row);
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching student' });
   }
 });
 
 // Mark attendance
-app.post('/api/attendance', async (req, res) => {
+app.post('/api/attendance', (req, res) => {
   try {
     const { qrId, timestamp } = req.body;
 
-    const student = await Student.findOne({ qrId });
-    if (!student) {
-      return res.status(404).json({ error: 'QR code not found' });
-    }
+    db.get('SELECT * FROM students WHERE qrId = ?', [qrId], (err, student) => {
+      if (err) {
+        console.error('Error finding student:', err);
+        return res.status(500).json({ error: 'Error marking attendance' });
+      }
 
-    const today = new Date().toISOString().split('T')[0];
-    const alreadyMarked = await Attendance.findOne({ qrId, date: today });
+      if (!student) {
+        return res.status(404).json({ error: 'QR code not found' });
+      }
 
-    if (alreadyMarked) {
-      return res.json({ 
-        success: true, 
-        message: 'Already marked for today',
-        alreadyMarked: true,
-        student
+      const today = new Date().toISOString().split('T')[0];
+
+      db.get('SELECT * FROM attendance WHERE qrId = ? AND date = ?', [qrId, today], (err, existing) => {
+        if (err) {
+          console.error('Error checking existing attendance:', err);
+          return res.status(500).json({ error: 'Error marking attendance' });
+        }
+
+        if (existing) {
+          return res.json({
+            success: true,
+            message: 'Already marked for today',
+            alreadyMarked: true,
+            student
+          });
+        }
+
+        const newAttendance = {
+          qrId,
+          studentId: student.id,
+          name: student.name,
+          registrationNumber: student.registrationNumber,
+          email: student.email,
+          timestamp: timestamp || new Date().toISOString(),
+          date: today
+        };
+
+        db.run(`
+          INSERT INTO attendance (qrId, studentId, name, registrationNumber, email, timestamp, date)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [
+          newAttendance.qrId,
+          newAttendance.studentId,
+          newAttendance.name,
+          newAttendance.registrationNumber,
+          newAttendance.email,
+          newAttendance.timestamp,
+          newAttendance.date
+        ], function(err) {
+          if (err) {
+            console.error('Error inserting attendance:', err);
+            return res.status(500).json({ error: 'Error marking attendance' });
+          }
+
+          res.json({
+            success: true,
+            message: 'Attendance marked successfully',
+            student
+          });
+        });
       });
-    }
-
-    const newAttendance = new Attendance({
-      qrId,
-      studentId: student.id,
-      name: student.name,
-      registrationNumber: student.registrationNumber,
-      email: student.email,
-      timestamp: timestamp || new Date().toISOString(),
-      date: today
-    });
-
-    await newAttendance.save();
-
-    res.json({
-      success: true,
-      message: 'Attendance marked successfully',
-      student
     });
   } catch (error) {
     console.error('Attendance error:', error);
@@ -189,10 +295,15 @@ app.post('/api/attendance', async (req, res) => {
 });
 
 // Get attendance records
-app.get('/api/attendance', async (req, res) => {
+app.get('/api/attendance', (req, res) => {
   try {
-    const attendance = await Attendance.find({}).sort({ timestamp: -1 });
-    res.json(attendance);
+    db.all('SELECT * FROM attendance ORDER BY timestamp DESC', [], (err, rows) => {
+      if (err) {
+        console.error('Error fetching attendance:', err);
+        return res.status(500).json({ error: 'Error fetching attendance' });
+      }
+      res.json(rows);
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching attendance' });
   }
@@ -209,18 +320,33 @@ app.get('/api/attendance/:date', async (req, res) => {
 });
 
 // Get stats
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', (req, res) => {
   try {
-    const totalStudents = await Student.countDocuments();
-    const totalAttendanceRecords = await Attendance.countDocuments();
-    
-    // Simple stats: count of students with at least one record
-    const uniqueStudentsScanned = await Attendance.distinct('qrId');
-    
-    res.json({
-      totalStudents,
-      totalAttendanceRecords,
-      uniqueScannedCount: uniqueStudentsScanned.length
+    db.get('SELECT COUNT(*) as totalStudents FROM students', [], (err, studentRow) => {
+      if (err) {
+        console.error('Error fetching student count:', err);
+        return res.status(500).json({ error: 'Error fetching stats' });
+      }
+
+      db.get('SELECT COUNT(*) as totalAttendanceRecords FROM attendance', [], (err, attendanceRow) => {
+        if (err) {
+          console.error('Error fetching attendance count:', err);
+          return res.status(500).json({ error: 'Error fetching stats' });
+        }
+
+        db.all('SELECT DISTINCT qrId FROM attendance', [], (err, uniqueRows) => {
+          if (err) {
+            console.error('Error fetching unique students:', err);
+            return res.status(500).json({ error: 'Error fetching stats' });
+          }
+
+          res.json({
+            totalStudents: studentRow.totalStudents,
+            totalAttendanceRecords: attendanceRow.totalAttendanceRecords,
+            uniqueScannedCount: uniqueRows.length
+          });
+        });
+      });
     });
   } catch (error) {
     res.status(500).json({ error: 'Error fetching stats' });
@@ -228,32 +354,37 @@ app.get('/api/stats', async (req, res) => {
 });
 
 // Download report
-app.get('/api/report', async (req, res) => {
+app.get('/api/report', (req, res) => {
   try {
-    const attendance = await Attendance.find({}).sort({ date: -1, timestamp: -1 });
-    
-    if (attendance.length === 0) {
-      return res.status(400).json({ error: 'No attendance records' });
-    }
+    db.all('SELECT * FROM attendance ORDER BY date DESC, timestamp DESC', [], (err, attendance) => {
+      if (err) {
+        console.error('Error fetching attendance for report:', err);
+        return res.status(500).json({ error: 'Error generating report' });
+      }
 
-    const headers = ['Student ID', 'Name', 'Registration Number', 'Email', 'Date', 'Time'];
-    const rows = attendance.map(a => [
-      a.studentId,
-      a.name,
-      a.registrationNumber,
-      a.email,
-      a.date,
-      new Date(a.timestamp).toLocaleTimeString()
-    ]);
+      if (attendance.length === 0) {
+        return res.status(400).json({ error: 'No attendance records' });
+      }
 
-    const csv = [headers, ...rows].map(row => 
-      row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')
-    ).join('\n');
+      const headers = ['Student ID', 'Name', 'Registration Number', 'Email', 'Date', 'Time'];
+      const rows = attendance.map(a => [
+        a.studentId,
+        a.name,
+        a.registrationNumber,
+        a.email,
+        a.date,
+        new Date(a.timestamp).toLocaleTimeString()
+      ]);
 
-    const bom = '\ufeff';
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=attendance_report_${new Date().toISOString().split('T')[0]}.csv`);
-    res.send(bom + csv);
+      const csv = [headers, ...rows].map(row =>
+        row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')
+      ).join('\n');
+
+      const bom = '\ufeff';
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=attendance_report_${new Date().toISOString().split('T')[0]}.csv`);
+      res.send(bom + csv);
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error generating report' });
   }
